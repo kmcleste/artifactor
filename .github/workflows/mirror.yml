@@ -1,0 +1,89 @@
+name: Mirror URL to Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL to download and mirror"
+        required: true
+        type: string
+      filename:
+        description: "Output filename (leave blank to infer from URL)"
+        required: false
+        type: string
+      artifact_name:
+        description: "Artifact bundle name (default: mirrored-file)"
+        required: false
+        default: "mirrored-file"
+        type: string
+      retention_days:
+        description: "Days to retain artifact (1–90)"
+        required: false
+        default: "30"
+        type: string
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate URL
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url }}
+        run: |
+          # Reject anything that isn't http/https
+          if [[ ! "$INPUT_URL" =~ ^https?:// ]]; then
+            echo "::error::URL must start with http:// or https://"
+            exit 1
+          fi
+
+      - name: Resolve output filename
+        id: resolve
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url }}
+          INPUT_FILENAME: ${{ inputs.filename }}
+        run: |
+          if [[ -n "$INPUT_FILENAME" ]]; then
+            # Strip any path separators from a user-supplied name
+            SAFE_NAME=$(basename "$INPUT_FILENAME")
+          else
+            # Pull the last path segment from the URL, strip query strings
+            SAFE_NAME=$(basename "${INPUT_URL%%\?*}")
+            # Fall back to "download" if the URL has no useful filename
+            [[ -z "$SAFE_NAME" || "$SAFE_NAME" == "/" ]] && SAFE_NAME="download"
+          fi
+          echo "filename=$SAFE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Resolved output filename: $SAFE_NAME"
+
+      - name: Download file
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url }}
+          OUT_FILE: ${{ steps.resolve.outputs.filename }}
+        run: |
+          mkdir -p artifact
+          echo "Downloading: $INPUT_URL"
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --connect-timeout 30 \
+            --max-time 300 \
+            --output "artifact/$OUT_FILE" \
+            -- "$INPUT_URL"
+          echo "Download complete."
+          ls -lh "artifact/$OUT_FILE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: artifact/
+          retention-days: ${{ inputs.retention_days }}
+          if-no-files-found: error
