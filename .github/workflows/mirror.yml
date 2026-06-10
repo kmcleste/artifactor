@@ -88,6 +88,7 @@ jobs:
             --retry-delay 2 \
             --connect-timeout 30 \
             --max-time 300 \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" \
             --output "download/$OUT_FILE" \
             -- "$INPUT_URL"
           ls -lh "download/$OUT_FILE"
