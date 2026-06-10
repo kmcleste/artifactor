@@ -1,6 +1,8 @@
 # artifactor
 
-A minimal GitHub Actions mirror service. Paste a URL, get a downloadable artifact — useful when your enterprise network blocks certain domains but GitHub is accessible.
+A minimal GitHub Actions mirror service. Paste a URL, get a public download link — useful when your enterprise network blocks certain domains but GitHub is accessible.
+
+Each run creates a GitHub Release with the file attached as an asset. Release assets are publicly downloadable without authentication.
 
 ## Usage
 
@@ -11,27 +13,28 @@ A minimal GitHub Actions mirror service. Paste a URL, get a downloadable artifac
 |---|---|---|
 | `url` | Yes | The `http://` or `https://` URL to download |
 | `filename` | No | Override the output filename (defaults to the URL's last path segment) |
-| `artifact_name` | No | Name for the artifact bundle (default: `mirrored-file`) |
-| `retention_days` | No | Days to keep the artifact, 1–90 (default: `30`) |
+| `tag` | No | Git tag for the release (default: `mirror-YYYYMMDD-HHMMSS`) |
+| `release_name` | No | Human-readable release title (defaults to the tag) |
 
-3. Once the run finishes, open the completed workflow run and download the artifact from the **Artifacts** section at the bottom of the summary page.
+3. When the run finishes, the public download URL is printed at the bottom of the job log:
 
-## Downloading via API
-
-If you want to script the download (e.g. pull the artifact straight into a CI job or a script):
-
-```bash
-# List artifacts for the repo
-gh api repos/OWNER/REPO/actions/artifacts
-
-# Download a specific artifact by ID
-gh api repos/OWNER/REPO/actions/artifacts/ARTIFACT_ID/zip > mirrored.zip
+```
+========================================
+  Public download URL:
+  https://github.com/OWNER/REPO/releases/download/TAG/FILENAME
+========================================
 ```
 
-Or via the GitHub web UI: run summary page → scroll to **Artifacts** → click the artifact name.
+You can also find the file under the **Releases** page of this repo.
 
-## Limits
+## Direct download (no browser)
+
+```bash
+curl -L -O https://github.com/OWNER/REPO/releases/download/TAG/FILENAME
+```
+
+## Notes
 
 - Only `http://` and `https://` URLs are accepted.
-- GitHub artifact storage limits apply (500 MB per file is a practical safe ceiling; the hard cap is governed by your plan).
-- Artifacts are deleted automatically after `retention_days`.
+- Each run creates a separate release. Old releases can be deleted from the Releases page when no longer needed.
+- The repo must be **public** for unauthenticated downloads to work. Private repos require a token (`Authorization: Bearer <token>`) on the download request.

@@ -11,22 +11,20 @@ on:
         description: "Output filename (leave blank to infer from URL)"
         required: false
         type: string
-      artifact_name:
-        description: "Artifact bundle name (default: mirrored-file)"
+      tag:
+        description: "Release tag (leave blank to auto-generate: mirror-YYYYMMDD-HHMMSS)"
         required: false
-        default: "mirrored-file"
         type: string
-      retention_days:
-        description: "Days to retain artifact (1–90)"
+      release_name:
+        description: "Release title (leave blank to use the tag)"
         required: false
-        default: "30"
         type: string
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # required to create releases and upload assets
 
     steps:
       - name: Validate URL
@@ -34,30 +32,45 @@ jobs:
         env:
           INPUT_URL: ${{ inputs.url }}
         run: |
-          # Reject anything that isn't http/https
           if [[ ! "$INPUT_URL" =~ ^https?:// ]]; then
             echo "::error::URL must start with http:// or https://"
             exit 1
           fi
 
-      - name: Resolve output filename
+      - name: Resolve filename and tag
         id: resolve
         shell: bash
         env:
           INPUT_URL: ${{ inputs.url }}
           INPUT_FILENAME: ${{ inputs.filename }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_RELEASE_NAME: ${{ inputs.release_name }}
         run: |
+          # Filename
           if [[ -n "$INPUT_FILENAME" ]]; then
-            # Strip any path separators from a user-supplied name
             SAFE_NAME=$(basename "$INPUT_FILENAME")
           else
-            # Pull the last path segment from the URL, strip query strings
             SAFE_NAME=$(basename "${INPUT_URL%%\?*}")
-            # Fall back to "download" if the URL has no useful filename
             [[ -z "$SAFE_NAME" || "$SAFE_NAME" == "/" ]] && SAFE_NAME="download"
           fi
-          echo "filename=$SAFE_NAME" >> "$GITHUB_OUTPUT"
-          echo "Resolved output filename: $SAFE_NAME"
+
+          # Tag
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="mirror-$(date -u +%Y%m%d-%H%M%S)"
+          fi
+
+          # Release title
+          RELEASE_NAME="${INPUT_RELEASE_NAME:-$TAG}"
+
+          echo "filename=$SAFE_NAME"   >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"              >> "$GITHUB_OUTPUT"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Filename : $SAFE_NAME"
+          echo "Tag      : $TAG"
+          echo "Release  : $RELEASE_NAME"
 
       - name: Download file
         shell: bash
@@ -65,8 +78,8 @@ jobs:
           INPUT_URL: ${{ inputs.url }}
           OUT_FILE: ${{ steps.resolve.outputs.filename }}
         run: |
-          mkdir -p artifact
-          echo "Downloading: $INPUT_URL"
+          mkdir -p download
+          echo "Fetching: $INPUT_URL"
           curl \
             --fail \
             --show-error \
@@ -75,15 +88,29 @@ jobs:
             --retry-delay 2 \
             --connect-timeout 30 \
             --max-time 300 \
-            --output "artifact/$OUT_FILE" \
+            --output "download/$OUT_FILE" \
             -- "$INPUT_URL"
-          echo "Download complete."
-          ls -lh "artifact/$OUT_FILE"
+          ls -lh "download/$OUT_FILE"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: artifact/
-          retention-days: ${{ inputs.retention_days }}
-          if-no-files-found: error
+      - name: Create release and upload asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          RELEASE_NAME: ${{ steps.resolve.outputs.release_name }}
+          OUT_FILE: ${{ steps.resolve.outputs.filename }}
+          SOURCE_URL: ${{ inputs.url }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_NAME" \
+            --notes "Mirrored from: $SOURCE_URL" \
+            "download/$OUT_FILE"
+
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${OUT_FILE}"
+          echo ""
+          echo "========================================"
+          echo "  Public download URL:"
+          echo "  $DOWNLOAD_URL"
+          echo "========================================"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
